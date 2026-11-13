@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<title>حضور و غیاب هوشمند</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#6b7280;--pri:#2563eb;--ok:#16a34a;--bad:#dc2626;--bd:#e5e7eb;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1a1f26;--tx:#e8eaed;--mut:#9aa3af;--bd:#2b323b;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font-family:Vazirmatn,Tahoma,system-ui,sans-serif;padding:env(safe-area-inset-top,0) 12px env(safe-area-inset-bottom,0);max-width:640px;margin:auto}
+h1{font-size:18px;margin:14px 0 4px}
+.sub{color:var(--mut);font-size:12px;margin-bottom:10px}
+.tabs{display:flex;gap:6px;margin:10px 0}
+.tabs button{flex:1;padding:10px 4px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;font:inherit;font-size:14px}
+.tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:12px}
+.stage{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:4/3}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.btn{padding:11px 14px;border:0;border-radius:10px;background:var(--pri);color:#fff;font:inherit;font-size:14px}
+.btn.sec{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+.btn.ok{background:var(--ok)}
+.btn:disabled{opacity:.5}
+input[type=text]{width:100%;padding:11px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit;font-size:15px}
+.row{display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap}
+.msg{font-size:13px;color:var(--mut);margin-top:8px;min-height:18px}
+.stat{display:flex;gap:8px;margin-bottom:10px}
+.stat div{flex:1;text-align:center;padding:8px;border-radius:10px;background:var(--bg);font-size:12px;color:var(--mut)}
+.stat b{display:block;font-size:20px;color:var(--tx)}
+.list{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 4px;border-bottom:1px solid var(--bd);text-align:right}
+th{color:var(--mut);font-weight:normal;font-size:12px}
+.p{color:var(--ok)}.a{color:var(--bad)}
+.x{background:none;border:0;color:var(--mut);font-size:16px;padding:4px 8px}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>حضور و غیاب هوشمند</h1>
+<div class="sub" id="today"></div>
+
+<div class="tabs">
+  <button data-t="att" class="on">حضور و غیاب</button>
+  <button data-t="reg">ثبت دانش‌آموز</button>
+  <button data-t="list">لیست</button>
+</div>
+
+<div id="stageWrap" class="card">
+  <div class="stage"><video id="v" playsinline muted></video><canvas id="c"></canvas></div>
+  <div class="row">
+    <button class="btn sec" id="flip">چرخاندن دوربین</button>
+    <span class="msg" id="status">در حال بارگذاری مدل‌ها…</span>
+  </div>
+</div>
+
+<section id="s-att" class="card">
+  <div class="msg" id="attMsg">دوربین را روبه‌روی دانش‌آموزان بگیرید؛ هر چهره‌ی شناخته‌شده خودکار ثبت می‌شود.</div>
+</section>
+
+<section id="s-reg" class="card hide">
+  <input type="text" id="name" placeholder="نام و نام خانوادگی دانش‌آموز">
+  <div class="row">
+    <button class="btn" id="capture">ثبت چهره (۵ نمونه)</button>
+    <span class="msg" id="regCount"></span>
+  </div>
+  <div class="msg" id="regMsg">چهره را کامل و با نور خوب جلوی دوربین نگه دارید. در حین ثبت کمی سر را بچرخانید.</div>
+</section>
+
+<section id="s-list" class="card hide">
+  <div class="stat">
+    <div><b id="nAll">0</b>کل</div>
+    <div><b id="nP" class="p">0</b>حاضر</div>
+    <div><b id="nA" class="a">0</b>غایب</div>
+  </div>
+  <div class="list"><table id="tbl"></table></div>
+  <div class="row">
+    <button class="btn ok" id="csv">خروجی Excel (CSV)</button>
+    <button class="btn sec" id="clearToday">پاک‌کردن حضور امروز</button>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
+<script>
+const MODELS='https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/';
+const $=s=>document.querySelector(s);
+const v=$('#v'), cv=$('#c'), ctx=cv.getContext('2d');
+const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
+let students=load('students',[]), att=load('att',{});
+const save=()=>{try{localStorage.setItem('students',JSON.stringify(students));localStorage.setItem('att',JSON.stringify(att))}catch(e){}};
+const dayKey=()=>new Date().toLocaleDateString('sv-SE');
+const fmt=t=>new Date(t).toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'});
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+$('#today').textContent=new Date().toLocaleDateString('fa-IR',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+
+let tab='att', facing='user', stream=null, ready=false, matcher=null, streak={}, busy=false, running=false;
+const opts=()=>new faceapi.TinyFaceDetectorOptions({inputSize:416,scoreThreshold:.5});
+
+async function init(){
+  try{
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODELS),
+      faceapi.nets.faceLandmark68Net.loadFromUri(MODELS),
+      faceapi.nets.faceRecognitionNet.loadFromUri(MODELS)
+    ]);
+    ready=true; $('#status').textContent='آماده';
+    buildMatcher(); startCam();
+  }catch(e){
+    $('#status').textContent='مدل‌ها بارگذاری نشدند. اینترنت و HTTPS بودن آدرس را بررسی کنید.';
+  }
+}
+async function startCam(){
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:640},height:{ideal:480}},audio:false});
+    v.srcObject=stream; await v.play();
+    cv.width=v.videoWidth; cv.height=v.videoHeight;
+    v.style.transform=cv.style.transform=facing==='user'?'scaleX(-1)':'none';
+    if(!running){running=true;loop();}
+  }catch(e){ $('#status').textContent='دسترسی به دوربین ممکن نشد. اجازه‌ی دوربین را بدهید.'; }
+}
+$('#flip').onclick=()=>{facing=facing==='user'?'environment':'user';startCam();};
+
+function buildMatcher(){
+  matcher=students.length?new faceapi.FaceMatcher(
+    students.map(s=>new faceapi.LabeledFaceDescriptors(s.id,s.descs.map(d=>new Float32Array(d)))),0.5):null;
+}
+
+function mark(s){
+  const k=dayKey(); att[k]=att[k]||{};
+  if(att[k][s.id]) return;
+  att[k][s.id]=Date.now(); save();
+  $('#attMsg').innerHTML='✅ '+s.name+' ثبت شد — '+fmt(att[k][s.id]);
+  if(navigator.vibrate) navigator.vibrate(60);
+}
+
+async function loop(){
+  if(tab==='list'||!ready||busy){ setTimeout(loop,300); return; }
+  busy=true;
+  try{
+    const res=await faceapi.detectAllFaces(v,opts()).withFaceLandmarks().withFaceDescriptors();
+    ctx.clearRect(0,0,cv.width,cv.height);
+    const seen={};
+    for(const r of res){
+      const b=r.detection.box; let label='', color='#f59e0b';
+      if(tab==='att'&&matcher){
+        const m=matcher.findBestMatch(r.descriptor);
+        const s=students.find(x=>x.id===m.label);
+        if(s){
+          seen[s.id]=1; streak[s.id]=(streak[s.id]||0)+1;
+          label=s.name; color='#16a34a';
+          if(streak[s.id]>=3) mark(s);
+        } else label='ناشناس';
+      }
+      ctx.lineWidth=3; ctx.strokeStyle=color; ctx.strokeRect(b.x,b.y,b.width,b.height);
+      if(label){
+        ctx.font='bold 20px Tahoma'; const w=ctx.measureText(label).width+12;
+        ctx.save();
+        if(facing==='user'){ctx.translate(b.x*2+b.width,0);ctx.scale(-1,1);}
+        ctx.fillStyle=color; ctx.fillRect(b.x,b.y-28,w,26);
+        ctx.fillStyle='#fff'; ctx.fillText(label,b.x+6,b.y-8);
+        ctx.restore();
+      }
+    }
+    for(const id in streak) if(!seen[id]) streak[id]=0;
+  }catch(e){}
+  busy=false; setTimeout(loop,120);
+}
+
+// ثبت دانش‌آموز
+function updReg(){ $('#regCount').textContent='تعداد: '+students.length.toLocaleString('fa-IR')+' نفر'; }
+$('#capture').onclick=async()=>{
+  const name=$('#name').value.trim();
+  if(!ready) return;
+  if(!name){ $('#regMsg').textContent='ابتدا نام را وارد کنید.'; return; }
+  const btn=$('#capture'); btn.disabled=true; busy=true;
+  const descs=[];
+  for(let i=0;i<5;i++){
+    $('#regMsg').textContent='نمونه '+(i+1).toLocaleString('fa-IR')+' از ۵ …';
+    let tries=0, r=null;
+    while(!r&&tries<15){
+      r=await faceapi.detectSingleFace(v,opts()).withFaceLandmarks().withFaceDescriptor();
+      if(!r) await new Promise(ok=>setTimeout(ok,200));
+      tries++;
+    }
+    if(!r){ $('#regMsg').textContent='چهره پیدا نشد؛ دوباره تلاش کنید.'; btn.disabled=false; busy=false; return; }
+    descs.push(Array.from(r.descriptor));
+    await new Promise(ok=>setTimeout(ok,500));
+  }
+  students.push({id:uid(),name,descs}); save(); buildMatcher();
+  $('#name').value=''; $('#regMsg').textContent='✅ '+name+' ثبت شد.'; updReg();
+  btn.disabled=false; busy=false;
+};
+
+// لیست
+function renderList(){
+  const k=dayKey(), d=att[k]||{};
+  const p=students.filter(s=>d[s.id]).length;
+  $('#nAll').textContent=students.length.toLocaleString('fa-IR');
+  $('#nP').textContent=p.toLocaleString('fa-IR');
+  $('#nA').textContent=(students.length-p).toLocaleString('fa-IR');
+  $('#tbl').innerHTML='<tr><th>نام</th><th>وضعیت</th><th>ورود</th><th></th><th></th></tr>'+
+    students.map(s=>`<tr><td>${esc(s.name)}</td>
+      <td class="${d[s.id]?'p':'a'}">${d[s.id]?'حاضر':'غایب'}</td>
+      <td>${d[s.id]?fmt(d[s.id]):'—'}</td>
+      <td><button class="x" data-tg="${s.id}" title="تغییر دستی">⇄</button></td>
+      <td><button class="x" data-del="${s.id}" title="حذف">✕</button></td></tr>`).join('');
+}
+const esc=t=>t.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+$('#tbl').onclick=e=>{
+  const tg=e.target.dataset.tg, del=e.target.dataset.del, k=dayKey();
+  if(tg){ att[k]=att[k]||{}; if(att[k][tg]) delete att[k][tg]; else att[k][tg]=Date.now(); save(); renderList(); }
+  if(del&&confirm('این دانش‌آموز حذف شود؟')){ students=students.filter(s=>s.id!==del); save(); buildMatcher(); renderList(); }
+};
+$('#clearToday').onclick=()=>{ if(confirm('حضور امروز پاک شود؟')){ delete att[dayKey()]; save(); renderList(); } };
+$('#csv').onclick=()=>{
+  const k=dayKey(), d=att[k]||{};
+  const rows=[['نام','وضعیت','ساعت ورود'],...students.map(s=>[s.name,d[s.id]?'حاضر':'غایب',d[s.id]?new Date(d[s.id]).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}):''])];
+  const csv='\ufeff'+rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const fname='attendance-'+k+'.csv';
+  if(window.Android){ Android.saveCsv(fname,csv); return; }
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=fname; a.click();
+};
+
+// تب‌ها
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  tab=b.dataset.t;
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  ['att','reg','list'].forEach(t=>$('#s-'+t).classList.toggle('hide',t!==tab));
+  $('#stageWrap').classList.toggle('hide',tab==='list');
+  if(tab==='list') renderList();
+  if(tab==='reg') updReg();
+  ctx.clearRect(0,0,cv.width,cv.height);
+});
+updReg(); init();
+</script>
+</body>
+</html>
